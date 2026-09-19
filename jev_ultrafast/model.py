@@ -1,4 +1,4 @@
-"""A Jev-protocol engine makes choices; an optional small OpenAI-compatible model writes field values."""
+"""TypeSafe makes choices; an optional small OpenAI-compatible model writes field values."""
 
 import json
 import math
@@ -10,20 +10,6 @@ import httpx
 from .questions import NEXT_ACTION, TARGET, TEXT_VALUE
 
 CLIENT = httpx.Client(http2=True, timeout=25)
-
-# The decision engine is any service speaking the Jev protocol. The default is a local
-# semif-serve instance; set TYPESAFE_BASE_URL to https://api.typesafe.ai for hosted Jev.
-DEFAULT_BASE_URL = "http://127.0.0.1:8077"
-HOSTED_HOST = "api.typesafe.ai"
-
-
-def decision_endpoint():
-    """Return the decision URL and its credential, requiring a key only where one is needed."""
-    base = os.environ.get("TYPESAFE_BASE_URL", DEFAULT_BASE_URL).rstrip("/")
-    key = os.environ.get("TYPESAFE_API_KEY", "")
-    if HOSTED_HOST in base and not key:
-        raise ValueError(f"{HOSTED_HOST} needs TYPESAFE_API_KEY; no action executed.")
-    return base + "/v1/systemone", key
 
 
 def post_json(url, key, body):
@@ -57,7 +43,7 @@ def validate_choice(answer, ids):
     except (KeyError, TypeError, ValueError):
         valid = False
     if not valid:
-        raise ValueError("Invalid decision response; no action executed.")
+        raise ValueError("Invalid TypeSafe response; no action executed.")
     return answer
 
 
@@ -132,8 +118,8 @@ def choose(state, goal, history):
         "questions": questions,
     }
     started = time.perf_counter()
-    url, key = decision_endpoint()
-    result = post_json(url, key, body)
+    base = os.environ.get("TYPESAFE_BASE_URL", "https://api.typesafe.ai").rstrip("/")
+    result = post_json(base + "/v1/systemone", os.environ.get("TYPESAFE_API_KEY", ""), body)
     operation_answer = validate_choice(result["answers"].get("operation", {}), operations)
     operation = operation_answer["choice"]
     target = None

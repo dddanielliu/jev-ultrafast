@@ -60,7 +60,7 @@ def test_invalid_choice_is_rejected(mutation):
         a["choice"] = "b"
     else:
         a["confidence"] = 5
-    with pytest.raises(ValueError, match="Invalid decision"):
+    with pytest.raises(ValueError, match="Invalid TypeSafe"):
         model.validate_choice(a, {"a", "b"})
 
 
@@ -109,7 +109,7 @@ def test_click_cannot_consume_a_text_target(monkeypatch):
 
     monkeypatch.setenv("TYPESAFE_API_KEY", "test")
     monkeypatch.setattr(model, "post_json", post)
-    with pytest.raises(ValueError, match="Invalid decision"):
+    with pytest.raises(ValueError, match="Invalid TypeSafe"):
         model.choose(page(), "Find a book", [])
 
 
@@ -320,26 +320,23 @@ def test_navigation_during_prediction_reobserves_without_action(runner):
     runner.state["browser"].act.assert_not_called()
 
 
-def test_endpoint_defaults_to_a_local_engine_and_needs_no_key(monkeypatch):
+def test_decision_url_comes_from_the_environment(monkeypatch):
+    sent = {}
+
+    def post(url, key, body):
+        sent.update(url=url, key=key)
+        return {"model": "test", "answers": {"operation": choice(body["questions"]["operation"]["criteria"], "WAIT")}}
+
+    monkeypatch.setattr(model, "post_json", post)
+    monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
     monkeypatch.delenv("TYPESAFE_BASE_URL", raising=False)
-    monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
-    url, key = model.decision_endpoint()
-    assert url == "http://127.0.0.1:8077/v1/systemone" and key == ""
+    model.choose(page(), "Find a book", [])
+    assert sent == {"url": "https://api.typesafe.ai/v1/systemone", "key": ""}, "hosted Jev stays the default"
 
-
-def test_trailing_slash_does_not_double_the_path(monkeypatch):
-    monkeypatch.setenv("TYPESAFE_BASE_URL", "http://gpu.test:8077/")
-    monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
-    assert model.decision_endpoint()[0] == "http://gpu.test:8077/v1/systemone"
-
-
-def test_hosted_jev_still_requires_its_key(monkeypatch):
-    monkeypatch.setenv("TYPESAFE_BASE_URL", "https://api.typesafe.ai")
-    monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
-    with pytest.raises(ValueError, match="TYPESAFE_API_KEY"):
-        model.decision_endpoint()
+    monkeypatch.setenv("TYPESAFE_BASE_URL", "http://127.0.0.1:8077/")
     monkeypatch.setenv("TYPESAFE_API_KEY", "sk-test")
-    assert model.decision_endpoint() == ("https://api.typesafe.ai/v1/systemone", "sk-test")
+    model.choose(page(), "Find a book", [])
+    assert sent == {"url": "http://127.0.0.1:8077/v1/systemone", "key": "sk-test"}
 
 
 def test_unauthenticated_endpoint_sends_no_bearer_header(monkeypatch):
