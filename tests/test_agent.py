@@ -60,7 +60,7 @@ def test_invalid_choice_is_rejected(mutation):
         a["choice"] = "b"
     else:
         a["confidence"] = 5
-    with pytest.raises(ValueError, match="Invalid TypeSafe"):
+    with pytest.raises(ValueError, match="Invalid decision"):
         model.validate_choice(a, {"a", "b"})
 
 
@@ -109,7 +109,7 @@ def test_click_cannot_consume_a_text_target(monkeypatch):
 
     monkeypatch.setenv("TYPESAFE_API_KEY", "test")
     monkeypatch.setattr(model, "post_json", post)
-    with pytest.raises(ValueError, match="Invalid TypeSafe"):
+    with pytest.raises(ValueError, match="Invalid decision"):
         model.choose(page(), "Find a book", [])
 
 
@@ -318,3 +318,46 @@ def test_navigation_during_prediction_reobserves_without_action(runner):
     assert runner.state["status"] == "ready"
     assert runner.state["decision"] is None
     runner.state["browser"].act.assert_not_called()
+
+
+def test_endpoint_defaults_to_a_local_engine_and_needs_no_key(monkeypatch):
+    monkeypatch.delenv("TYPESAFE_BASE_URL", raising=False)
+    monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
+    url, key = model.decision_endpoint()
+    assert url == "http://127.0.0.1:8077/v1/systemone" and key == ""
+
+
+def test_trailing_slash_does_not_double_the_path(monkeypatch):
+    monkeypatch.setenv("TYPESAFE_BASE_URL", "http://gpu.test:8077/")
+    monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
+    assert model.decision_endpoint()[0] == "http://gpu.test:8077/v1/systemone"
+
+
+def test_hosted_jev_still_requires_its_key(monkeypatch):
+    monkeypatch.setenv("TYPESAFE_BASE_URL", "https://api.typesafe.ai")
+    monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
+    with pytest.raises(ValueError, match="TYPESAFE_API_KEY"):
+        model.decision_endpoint()
+    monkeypatch.setenv("TYPESAFE_API_KEY", "sk-test")
+    assert model.decision_endpoint() == ("https://api.typesafe.ai/v1/systemone", "sk-test")
+
+
+def test_unauthenticated_endpoint_sends_no_bearer_header(monkeypatch):
+    sent = {}
+
+    class Response:
+        status_code = 200
+        is_error = False
+
+        def json(self):
+            return {"ok": True}
+
+    def post(url, json, headers):
+        sent.update(url=url, headers=headers)
+        return Response()
+
+    monkeypatch.setattr(model.CLIENT, "post", post)
+    model.post_json("http://local.test/v1/systemone", "", {"a": 1})
+    assert sent["headers"] == {}
+    model.post_json("http://local.test/v1/systemone", "k", {"a": 1})
+    assert sent["headers"] == {"Authorization": "Bearer k"}

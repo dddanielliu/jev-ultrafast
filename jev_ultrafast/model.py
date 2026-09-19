@@ -1,4 +1,4 @@
-"""TypeSafe makes choices; an optional small OpenAI-compatible model writes field values."""
+"""A Jev-protocol engine makes choices; an optional small OpenAI-compatible model writes field values."""
 
 import json
 import math
@@ -11,11 +11,27 @@ from .questions import NEXT_ACTION, TARGET, TEXT_VALUE
 
 CLIENT = httpx.Client(http2=True, timeout=25)
 
+# The decision engine is any service speaking the Jev protocol. The default is a local
+# semif-serve instance; set TYPESAFE_BASE_URL to https://api.typesafe.ai for hosted Jev.
+DEFAULT_BASE_URL = "http://127.0.0.1:8077"
+HOSTED_HOST = "api.typesafe.ai"
+
+
+def decision_endpoint():
+    """Return the decision URL and its credential, requiring a key only where one is needed."""
+    base = os.environ.get("TYPESAFE_BASE_URL", DEFAULT_BASE_URL).rstrip("/")
+    key = os.environ.get("TYPESAFE_API_KEY", "")
+    if HOSTED_HOST in base and not key:
+        raise ValueError(f"{HOSTED_HOST} needs TYPESAFE_API_KEY; no action executed.")
+    return base + "/v1/systemone", key
+
 
 def post_json(url, key, body):
+    # A self-hosted decision endpoint may run unauthenticated; do not send an empty bearer.
+    headers = {"Authorization": f"Bearer {key}"} if key else {}
     for attempt in range(3):
         try:
-            response = CLIENT.post(url, json=body, headers={"Authorization": f"Bearer {key}"})
+            response = CLIENT.post(url, json=body, headers=headers)
         except httpx.HTTPError:
             raise RuntimeError("Model connection failed; no action executed.") from None
         if response.status_code in {429, 529, 503} and attempt < 2:
@@ -41,7 +57,7 @@ def validate_choice(answer, ids):
     except (KeyError, TypeError, ValueError):
         valid = False
     if not valid:
-        raise ValueError("Invalid TypeSafe response; no action executed.")
+        raise ValueError("Invalid decision response; no action executed.")
     return answer
 
 
@@ -116,7 +132,8 @@ def choose(state, goal, history):
         "questions": questions,
     }
     started = time.perf_counter()
-    result = post_json("https://api.typesafe.ai/v1/systemone", os.environ["TYPESAFE_API_KEY"], body)
+    url, key = decision_endpoint()
+    result = post_json(url, key, body)
     operation_answer = validate_choice(result["answers"].get("operation", {}), operations)
     operation = operation_answer["choice"]
     target = None
